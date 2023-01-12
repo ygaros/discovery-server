@@ -3,16 +3,18 @@ package discovered
 import (
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type ServiceStorage interface {
 	Add(service Service) error
 	Remove(serviceId uuid.UUID) error
 	Get(serviceName string) (*Service, error)
+	GetById(serviceId uuid.UUID) (*Service, error)
 	GetAllServices() ([]Service, error)
 	UpdateLastHeartBeat(serviceName string, newTime time.Time) error
 	HandleUnHealthyServices()
@@ -28,10 +30,10 @@ func (s *inMemoryServiceStorage) Add(service Service) error {
 	defer s.lock.RUnlock()
 	if serv, err := s.Get(service.Name); err != nil {
 		s.services = append(s.services, service)
-		s.deleteIfOlderThan3Min(service)
+		s.deleteIfOlderThan3Min(service.id)
 		return nil
 	} else {
-		return errors.New(fmt.Sprintf("Service %s already registered!", serv.Name))
+		return fmt.Errorf("[err] service %s already registered!", serv.Name)
 	}
 }
 
@@ -45,7 +47,7 @@ func (s *inMemoryServiceStorage) Remove(serviceId uuid.UUID) error {
 			return nil
 		}
 	}
-	return errors.New(fmt.Sprintf("Service with id = %v not found", serviceId))
+	return fmt.Errorf("[err] service with id = %v not found", serviceId)
 }
 
 func (s *inMemoryServiceStorage) Get(serviceName string) (*Service, error) {
@@ -55,13 +57,24 @@ func (s *inMemoryServiceStorage) Get(serviceName string) (*Service, error) {
 			return service, nil
 		}
 	}
-	return &Service{}, errors.New(fmt.Sprintf("Service %s not found!", serviceName))
+	return &Service{}, fmt.Errorf("[err] service %s not found!", serviceName)
 }
+
+func (s *inMemoryServiceStorage) GetById(serviceId uuid.UUID) (*Service, error) {
+	for i := 0; i < len(s.services); i++ {
+		service := &s.services[i]
+		if service.id == serviceId {
+			return service, nil
+		}
+	}
+	return &Service{}, fmt.Errorf("[err] service %s not found!", serviceId)
+}
+
 func (s *inMemoryServiceStorage) GetAllServices() ([]Service, error) {
 	if s.services != nil {
 		return s.services, nil
 	}
-	return nil, errors.New("there arent any discovered services")
+	return nil, errors.New("[err] there arent any discovered services")
 }
 
 func (s *inMemoryServiceStorage) UpdateLastHeartBeat(serviceName string, newTime time.Time) error {
@@ -73,32 +86,35 @@ func (s *inMemoryServiceStorage) UpdateLastHeartBeat(serviceName string, newTime
 	return nil
 }
 func (s *inMemoryServiceStorage) HandleUnHealthyServices() {
-	for _, service := range s.services {
-		s.deleteIfOlderThan3Min(service)
+	for i := 0; i < len(s.services); i++ {
+		service := &s.services[i]
+		s.deleteIfOlderThan3Min(service.id)
 	}
 }
 
-func (s *inMemoryServiceStorage) deleteIfOlderThan3Min(service Service) {
-	log.Printf("Starting deletion procedure for unhealthy services %s 1/3min\n", service.Name)
+func (s *inMemoryServiceStorage) deleteIfOlderThan3Min(serviceId uuid.UUID) {
+	log.Printf("Starting deletion procedure for unhealthy services %s 1/3min\n", serviceId)
 	duration := 3 * time.Minute
 	quit := make(chan bool)
 	go func(quit chan bool) {
-		for range time.Tick(duration) {
+		ticker := time.NewTicker(duration)
+		for tick := range ticker.C {
 			select {
 			case <-quit:
 				return
 			default:
-				s.performDeletion(quit, service, duration)
+				s.performDeletion(quit, serviceId, duration, tick)
 			}
 		}
 	}(quit)
 
 }
 
-func (s *inMemoryServiceStorage) performDeletion(quit chan bool, service Service, duration time.Duration) {
-	if service.LastHeartBeatCheck.Add(duration).Before(time.Now()) {
-		log.Printf("Service %s unhealthy -> performing deletion\n", service.Name)
-		err := s.Remove(service.id)
+func (s *inMemoryServiceStorage) performDeletion(quit chan bool, serviceId uuid.UUID, duration time.Duration, tick time.Time) {
+	service, err := s.GetById(serviceId)
+	if err == nil && service.LastHeartBeatCheck.Add(duration).Before(tick) {
+		log.Printf("Service %s unhealthy -> performing deletion\n", serviceId)
+		err := s.Remove(serviceId)
 		if err != nil {
 			log.Println(err)
 		} else {

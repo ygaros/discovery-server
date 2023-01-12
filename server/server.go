@@ -3,13 +3,14 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"io"
 	"log"
 	"net/http"
 	"time"
 	"ygaros-discovery-server/discovered"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type ParsedServices struct {
@@ -19,8 +20,8 @@ type ParsedServices struct {
 }
 type serviceDTO struct {
 	Name   string `json:"name"`
-	Port   int    `json:"port"`
-	Domain string `json:"domain"`
+	Url    string `json:"url"`
+	Secure bool   `json:"secure"`
 }
 
 type Server interface {
@@ -50,15 +51,14 @@ func (s *server) AddService(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	log.Printf("Registered %s on %s:%d\n",
+	log.Printf("Registered %s on %s\n",
 		service.Name,
-		service.Domain,
-		service.Port,
+		service.Url,
 	)
 	createdService := discovered.NewService(
 		service.Name,
-		service.Domain,
-		service.Port,
+		service.Url,
+		service.Secure,
 	)
 	err = s.storage.Add(createdService)
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *server) ListServices(w http.ResponseWriter, _ *http.Request) {
 		for _, service := range services {
 			serviceNames = append(serviceNames, ParsedServices{
 				Name:          service.Name,
-				Path:          fmt.Sprintf("%s:%d", service.Domain, service.Port),
+				Path:          service.Url,
 				LastHeartBeat: service.LastHeartBeatCheck,
 			})
 		}
@@ -110,10 +110,9 @@ func (s *server) HeartBeat(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	log.Printf("HeartBeat %s on %s:%d\n",
+	log.Printf("HeartBeat %s on %s\n",
 		service.Name,
-		service.Domain,
-		service.Port,
+		service.Url,
 	)
 	err = s.storage.UpdateLastHeartBeat(savedService.Name, time.Now())
 	if err != nil {
@@ -131,7 +130,7 @@ func (s *server) GetService(w http.ResponseWriter, r *http.Request) {
 	}
 	get, err := s.storage.Get(serviceName)
 	if err != nil {
-		log.Println(fmt.Sprintf("Service %s isnt registered!", serviceName))
+		log.Printf("Service %s isnt registered!\n", serviceName)
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -139,12 +138,13 @@ func (s *server) GetService(w http.ResponseWriter, r *http.Request) {
 		w.Write(marshaled)
 		return
 	} else {
-		log.Println(fmt.Sprintf("error occurred during processing getService request on %s", serviceName))
+		log.Printf("error occurred during processing getService request on %s\n", serviceName)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 }
+
 func (s *server) Serve(port int) error {
 	if port == 0 {
 		port = 7654
@@ -159,10 +159,16 @@ func (s *server) Serve(port int) error {
 	})
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), r)
 }
+
 func NewDiscoveryServer(storage discovered.ServiceStorage) Server {
 	return &server{storage: storage}
 }
+
 func NewDiscoveryServerInMemoryStorage() Server {
 	storage := discovered.NewInMemoryServiceStorage()
 	return &server{storage: storage}
 }
+
+// func IndexMapping(w http.ResponseWriter, r *http.Request) {
+// 	http.ServeFile(w, r, "index.html")
+// }

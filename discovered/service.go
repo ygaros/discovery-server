@@ -1,24 +1,35 @@
 package discovered
 
 import (
-	"github.com/google/uuid"
+	"fmt"
 	"time"
+
+	"github.com/google/uuid"
+)
+
+const (
+	HTTPS = "https://"
+	HTTP  = "http://"
 )
 
 type Service struct {
 	id                 uuid.UUID
-	Name               string
-	Port               int
-	Domain             string
-	LastHeartBeatCheck time.Time
+	Name               string    `json:"name"`
+	Url                string    `json:"url"`
+	LastHeartBeatCheck time.Time `json:"lastHeartBeatCheck"`
 }
 
-func NewService(name string, domain string, port int) Service {
+func NewService(name string, url string, secure bool) Service {
+	var parsedUrl string
+	if secure {
+		parsedUrl = fmt.Sprintf("%s%s", HTTPS, url)
+	} else {
+		parsedUrl = fmt.Sprintf("%s%s", HTTP, url)
+	}
 	return Service{
 		id:                 uuid.New(),
 		Name:               name,
-		Domain:             domain,
-		Port:               port,
+		Url:                parsedUrl,
 		LastHeartBeatCheck: time.Now(),
 	}
 }
