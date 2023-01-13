@@ -33,7 +33,7 @@ func (s *inMemoryServiceStorage) Add(service Service) error {
 		s.deleteIfOlderThan3Min(service.id)
 		return nil
 	} else {
-		return fmt.Errorf("[err] service %s already registered!", serv.Name)
+		return fmt.Errorf("[err] service %s already registered", serv.Name)
 	}
 }
 
@@ -42,7 +42,7 @@ func (s *inMemoryServiceStorage) Remove(serviceId uuid.UUID) error {
 	defer s.lock.Unlock()
 	for index, service := range s.services {
 		if service.id == serviceId {
-			s.services[index] = s.services[len(s.services)-1]
+			s.services[index] = s.services[len(s.services)-index]
 			s.services = s.services[:len(s.services)-1]
 			return nil
 		}
@@ -57,7 +57,7 @@ func (s *inMemoryServiceStorage) Get(serviceName string) (*Service, error) {
 			return service, nil
 		}
 	}
-	return &Service{}, fmt.Errorf("[err] service %s not found!", serviceName)
+	return &Service{}, fmt.Errorf("[err] service %s not found", serviceName)
 }
 
 func (s *inMemoryServiceStorage) GetById(serviceId uuid.UUID) (*Service, error) {
@@ -67,7 +67,7 @@ func (s *inMemoryServiceStorage) GetById(serviceId uuid.UUID) (*Service, error) 
 			return service, nil
 		}
 	}
-	return &Service{}, fmt.Errorf("[err] service %s not found!", serviceId)
+	return &Service{}, fmt.Errorf("[err] service %s not found", serviceId)
 }
 
 func (s *inMemoryServiceStorage) GetAllServices() ([]Service, error) {
