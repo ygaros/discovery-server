@@ -1,4 +1,4 @@
-package discovered
+package discover
 
 import (
 	"fmt"
@@ -20,16 +20,17 @@ type Service struct {
 }
 
 func NewService(name string, url string, secure bool) Service {
-	var parsedUrl string
-	if secure {
-		parsedUrl = fmt.Sprintf("%s%s", HTTPS, url)
-	} else {
-		parsedUrl = fmt.Sprintf("%s%s", HTTP, url)
-	}
 	return Service{
 		id:                 uuid.New(),
 		Name:               name,
-		Url:                parsedUrl,
+		Url:                PrepareUrl(url, secure),
 		LastHeartBeatCheck: time.Now(),
+	}
+}
+func PrepareUrl(url string, secure bool) string {
+	if secure {
+		return fmt.Sprintf("%s%s", HTTPS, url)
+	} else {
+		return fmt.Sprintf("%s%s", HTTP, url)
 	}
 }

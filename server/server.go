@@ -1,174 +1,85 @@
 package server
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"time"
-	"ygaros-discovery-server/discovered"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/ygaros/discovery-server/discover"
+	"github.com/ygaros/discovery-server/dto"
 )
 
-type ParsedServices struct {
-	Name          string    `json:"name"`
-	Path          string    `json:"path"`
-	LastHeartBeat time.Time `json:"lastHeartBeat"`
+type DiscoveryService interface {
+	AddService(service dto.Service) error
+	ListServices() ([]dto.ServiceHeartBeat, error)
+	HeartBeat(service dto.Service) error
+	GetService(serviceName string) (dto.ServiceHeartBeat, error)
 }
-type serviceDTO struct {
-	Name   string `json:"name"`
-	Url    string `json:"url"`
-	Secure bool   `json:"secure"`
-}
-
-type Server interface {
-	AddService(w http.ResponseWriter, r *http.Request)
-	ListServices(w http.ResponseWriter, r *http.Request)
-	HeartBeat(w http.ResponseWriter, r *http.Request)
-	GetService(w http.ResponseWriter, r *http.Request)
-	Serve(port int) error
-}
-type server struct {
-	storage discovered.ServiceStorage
+type discoveryService struct {
+	storage discover.Storage
 }
 
-func (s *server) AddService(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Println("Failed to read body:", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-
-	service := serviceDTO{}
-
-	if err := json.Unmarshal(body, &service); err != nil {
-		log.Println("Failed to unmarshal payload:", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	log.Printf("Registered %s on %s\n",
-		service.Name,
-		service.Url,
-	)
-	createdService := discovered.NewService(
+func (s *discoveryService) AddService(service dto.Service) error {
+	newService := discover.NewService(
 		service.Name,
 		service.Url,
 		service.Secure,
 	)
-	err = s.storage.Add(createdService)
-	if err != nil {
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
+	err := s.storage.Add(newService)
+	return err
 }
-func (s *server) ListServices(w http.ResponseWriter, _ *http.Request) {
 
+func (s *discoveryService) ListServices() ([]dto.ServiceHeartBeat, error) {
+	var parsedService []dto.ServiceHeartBeat
+	var err error
 	if services, err := s.storage.GetAllServices(); err == nil {
-
-		var serviceNames []ParsedServices
 		for _, service := range services {
-			serviceNames = append(serviceNames, ParsedServices{
+			parsedService = append(parsedService, dto.ServiceHeartBeat{
 				Name:          service.Name,
-				Path:          service.Url,
+				Url:           service.Url,
 				LastHeartBeat: service.LastHeartBeatCheck,
 			})
 		}
-		if marshaled, err := json.Marshal(serviceNames); err == nil {
-			w.Write(marshaled)
-			return
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
 	}
-	w.WriteHeader(http.StatusBadRequest)
-}
-func (s *server) HeartBeat(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Println("Failed to read body:", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
 
-	service := serviceDTO{}
-
-	if err := json.Unmarshal(body, &service); err != nil {
-		log.Println("Failed to unmarshal payload:", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	savedService, err := s.storage.Get(service.Name)
-	if err != nil {
-		log.Println("Service not registered yet", err)
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	log.Printf("HeartBeat %s on %s\n",
-		service.Name,
-		service.Url,
-	)
-	err = s.storage.UpdateLastHeartBeat(savedService.Name, time.Now())
-	if err != nil {
-		log.Println("Error occurred during updating new date", err)
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
+	return parsedService, err
 }
-func (s *server) GetService(w http.ResponseWriter, r *http.Request) {
-	serviceName := r.URL.Query().Get("serviceName")
-	if len(serviceName) == 0 {
-		log.Println("serviceName parameter is mandatory!")
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	get, err := s.storage.Get(serviceName)
+
+func (s *discoveryService) HeartBeat(service dto.Service) error {
+	savedService, err := s.storage.GetByUrl(discover.PrepareUrl(service.Url, service.Secure))
 	if err != nil {
-		log.Printf("Service %s isnt registered!\n", serviceName)
-		w.WriteHeader(http.StatusNotFound)
-		return
+		log.Println(err)
+		return err
 	}
-	if marshaled, err := json.Marshal(get); err == nil {
-		w.Write(marshaled)
-		return
+	err = s.storage.UpdateLastHeartBeat(*savedService, time.Now())
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
+}
+
+func (s *discoveryService) GetService(serviceName string) (dto.ServiceHeartBeat, error) {
+	if service, err := s.storage.Get(serviceName); err == nil {
+		return dto.ServiceHeartBeat{
+			Name:          service.Name,
+			Url:           service.Url,
+			LastHeartBeat: service.LastHeartBeatCheck,
+		}, err
 	} else {
-		log.Printf("error occurred during processing getService request on %s\n", serviceName)
-		w.WriteHeader(http.StatusBadRequest)
-		return
+		return dto.ServiceHeartBeat{}, err
 	}
-
 }
 
-func (s *server) Serve(port int) error {
-	if port == 0 {
-		port = 7654
+//MultiMap implementation that allow multiple instances of the same service
+func NewDiscoveryServiceWithInMemoryStorage() DiscoveryService {
+	return &discoveryService{
+		storage: discover.NewMultiMapStorage(),
 	}
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Group(func(r chi.Router) {
-		r.Post("/register", s.AddService)
-		r.Post("/heartbeat", s.HeartBeat)
-		r.Get("/list", s.ListServices)
-		r.Get("/service", s.GetService)
-	})
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), r)
 }
 
-func NewDiscoveryServer(storage discovered.ServiceStorage) Server {
-	return &server{storage: storage}
+//Slice implementation that doesn't allow multiple instances of the same service
+func NewDiscoveryServiceWithSliceStorage() DiscoveryService {
+	return &discoveryService{
+		storage: discover.NewInMemoryStorage(),
+	}
 }
-
-func NewDiscoveryServerInMemoryStorage() Server {
-	storage := discovered.NewInMemoryServiceStorage()
-	return &server{storage: storage}
-}
-
-// func IndexMapping(w http.ResponseWriter, r *http.Request) {
-// 	http.ServeFile(w, r, "index.html")
-// }
