@@ -8,6 +8,10 @@ import (
 	"github.com/ygaros/discovery-server/dto"
 )
 
+const DEFAULT_PORT = 7654
+const DEFAULT_PORT_FOR_UI = 7655
+const TIME_FORMAT = "2006-01-02 15:04:05.999999999 -0700 MST"
+
 type DiscoveryService interface {
 	AddService(service dto.Service) error
 	ListServices() ([]dto.ServiceHeartBeat, error)

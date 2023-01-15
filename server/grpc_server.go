@@ -12,9 +12,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-const DEFAULT_PORT = 7654
-const TIME_FORMAT = "2006-01-02 15:04:05.999999999 -0700 MST"
-
 type GrpcServer interface {
 	Serve(port int) error
 	ServeDefaultPort() error
@@ -90,4 +87,18 @@ func NewDiscoveryGrpcServerInMemoryStorage() GrpcServer {
 }
 func NewDiscoveryGrpcServer(discoveryService *DiscoveryService) GrpcServer {
 	return &grpcServer{dservice: *discoveryService}
+}
+
+/*
+	Starts new default server on port 7654 for discovery (gRPC)
+	and on port 7655 http for ui.
+*/
+func NewServer() {
+	discoveryService := NewDiscoveryServiceWithInMemoryStorage()
+
+	grpcServer := NewDiscoveryGrpcServer(&discoveryService)
+	httpServer := NewHttpDiscoveryServer(&discoveryService)
+
+	go grpcServer.ServeDefaultPort()
+	httpServer.Serve(DEFAULT_PORT_FOR_UI)
 }
