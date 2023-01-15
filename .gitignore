@@ -1,2 +1,2 @@
 static/
-proto/
+proto/*.proto
